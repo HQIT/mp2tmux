@@ -1,0 +1,51 @@
+#include "Packet.h"
+#include "Program.h"
+#include "PES.h"
+
+#include "MP2TMuxer.h"
+#include "PSI.h"
+#include "PAT.h"
+
+#pragma warning (disable: 4996)
+
+static int realPacketsDeliverer(const unsigned char* data, const unsigned long size, void* obj){
+
+	FILE* f = fopen("C:\\dump\\foo.ts", "a+b");
+	//printf("error: %d \n", errno);
+	fwrite(data, 1, size, f);
+	fclose(f);
+
+	return 0;
+}
+
+int main(int argc, char* argv[]){
+
+	MP2TMuxer muxer;
+	muxer.SetPacketsDeliverer(realPacketsDeliverer);
+
+	Program* program = new Program(1, 0x20);
+	Program::StreamAudio *aud
+		= new Program::StreamAudio(Program::Stream::STREAMSUBTYPE_ISO_IEC_13818_3_AUDIO, 100);
+	Program::StreamVideo *vid
+		= new Program::StreamVideo(Program::Stream::STREAMSUBTYPE_H264_VIDEO, 101);
+	program->AddStream(aud);
+	program->AddStream(vid);
+	program->PCRPID(vid->ElementaryPID());
+
+	unsigned char data[2048] = {0};
+	for(int i = 0; i < 2048; i++){
+		data[i] = (unsigned char)i & 0xFF;
+	}
+
+	muxer.AddProgram(program);
+
+	for (int i = 0; i < 20; i++){
+		//TODO: only I frame increase PCR
+		muxer.Mux(vid, data, sizeof(data));
+		muxer.Mux(aud, data, sizeof(data));
+	}
+
+	system("pause");
+
+	return 0;
+}
