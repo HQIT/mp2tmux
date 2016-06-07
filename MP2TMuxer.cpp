@@ -53,22 +53,6 @@ int MP2TMuxer::Mux(Program::Stream* s, unsigned char* data, unsigned long size, 
 		mContinuityCounter[s->ElementaryPID()] = 0x00;
 	}
 
-	//unsigned char* pesBuffer = new unsigned char[PES::SIMPLE_HEADER_LENGTH + size];
-	
-	//pack into PES, make PES header
-	//PES pes(size);
-	//pes.MakeHeader(pesBuffer, s);
-
-	//memcpy(pesBuffer + PES::SIMPLE_HEADER_LENGTH, data, size);
-	//FILE* f = fopen("c:/dump/foo.h264", "a+b");
-	//FILE* f = fopen("c:/dump/foo.pes", "a+b");
-	//fwrite(data, 1, size, f);
-	//fwrite(pesBuffer + PES::SIMPLE_HEADER_LENGTH, size, 1, f);
-	//fwrite(pesBuffer, PES::SIMPLE_HEADER_LENGTH + size, 1, f);
-	//fclose(f);
-	//printf("++ PES size: %d (0x%04x)\n", PES::SIMPLE_HEADER_LENGTH + size, PES::SIMPLE_HEADER_LENGTH + size);
-
-	//Deliver(s->ElementaryPID(), pesBuffer, PES::SIMPLE_HEADER_LENGTH + size);
 	Deliver(s->ElementaryPID(), data, size);
 
 	//delete[] pesBuffer;
