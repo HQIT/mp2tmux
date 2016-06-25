@@ -1,43 +1,37 @@
 #pragma once
 
-enum ESDataType{
-	ESDT_INVALID = -1,
-	ESDT_VIDEO,
-	ESDT_AUDIO
-};
+#include "BasicBinaryBuffer.h"
+using namespace com::cloume::common;
 
-class PES
-{
-public:
+namespace com{
+	namespace cloume{
+		namespace cap{ 
+			namespace streaming{
 
-	const static unsigned char SIMPLE_HEADER_LENGTH = 14;
+				enum ESDataType{
+					ESDT_INVALID = -1,
+					ESDT_VIDEO,
+					ESDT_AUDIO
+				};
 
-	explicit PES(unsigned long payloadLength)
-		: mData(NULL), mType(ESDT_INVALID), mPayloadLength(0)
-	{
-		mPayloadLength = payloadLength;
-		mData = new unsigned char[payloadLength + SIMPLE_HEADER_LENGTH];
-	}
+				class PES : public BasicBinaryBuffer{
+					unsigned int mTimestamp;
+				public:
+					PES(char *, unsigned int, unsigned int timestamp);
+					unsigned int Timestamp();
+				};
 
-	virtual ~PES(void){
-		if(mData){
-			delete[] mData;
-			mData = NULL;
+				class PESHeader : public BasicBinaryBuffer{
+				public:
+					PESHeader(ESDataType type, unsigned int payloadLength, unsigned int timestamp = 0);
+
+				public:
+					unsigned int Length();
+
+				private:
+					const static int SIMPLE_PES_HEADER_LENGTH = 14;
+				};
+			}
 		}
 	}
-
-public:
-	//@data [out]: need 14 bytes at least
-	//void MakeHeader(unsigned char* data, Program::Stream* stream);
-	void Fill(unsigned char* data, ESDataType type);
-	void SetPTS(unsigned long long ts);
-	unsigned char *Data(){ return mData; }
-	unsigned long Size(){ return mPayloadLength + SIMPLE_HEADER_LENGTH; }
-	ESDataType Type(){ return mType; }
-
-private:
-	unsigned long mPayloadLength;
-	unsigned char *mData;
-	ESDataType mType;
-};
-
+}

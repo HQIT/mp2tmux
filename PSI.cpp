@@ -3,10 +3,17 @@
 
 #include <memory>
 
-int PSI::Bitstream(unsigned char*& pBuffer){
-	unsigned long size = BitstreamSize();
-	pBuffer = new unsigned char[size];
-	memset(pBuffer, 0x00, size);
+using namespace com::cloume::common;
+using namespace com::cloume::cap::streaming;
+
+PSI::PSI() : mBitstream(0){
+}
+
+void PSI::UpdateBitstream(){
+	mBitstream.resize(BitstreamSize(), 0);
+
+	unsigned char *pBuffer = (unsigned char *)mBitstream.data();
+	int size = BitstreamSize();
 
 	//*pBuffer = 0;
 	*(pBuffer + 1) = TableId();
@@ -37,12 +44,16 @@ int PSI::Bitstream(unsigned char*& pBuffer){
 	BitstreamAfterTableInfo(pBuffer + 9);
 
 	//CRC32
-	unsigned long crc = cap::CRC32::CaculateCRC(pBuffer + 1, size - 4 - 1);
+	unsigned long crc = CRC32::CaculateCRC(pBuffer + 1, size - 4 - 1);
 	unsigned int pos = size - 4;
+#pragma warning(disable: 4244)
 	*(pBuffer + pos) = crc >> 24;
 	*(pBuffer + pos + 1) = crc >> 16;
 	*(pBuffer + pos + 2) = crc >> 8;
 	*(pBuffer + pos + 3) = crc >> 0;
+#pragma warning(default: 4244)
+}
 
-	return size;
+char *PSI::Bitstream(){
+	return mBitstream.data();
 }

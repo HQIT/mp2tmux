@@ -8,14 +8,15 @@
 
 #include <algorithm>
 
-#include <Windows.h>
+using namespace com::cloume::cap;
+using namespace com::cloume::cap::streaming;
 
-MP2TMuxer::MP2TMuxer(bool period, double fps) 
-	: mDeliverer(NULL), mPSIPeriod(0), mFPS(fps), mFrameDuration(1.0 / fps), 
-	mDeliverHandler(NULL), mFrameCount(0), mPeriodicSendPSI(period){
-		mContinuityCounter[0x00] = 0x00;		//PAT
-
-		//GetLocalTime(&mBaseST);
+MP2TMuxer::MP2TMuxer(bool period, double fps/* = 25.*/) 
+	: mpDeliverer(NULL), mPSIPeriod(0), 
+	mPeriodicSendPSI(period), mFPS(fps), mFrameCount(0),
+	mpTicker(NULL), mLastPCR(0), mVideoStartTimestamp(0)
+{
+	mContinuityCounter[0x00] = 0x00;		//PAT
 }
 
 MP2TMuxer::~MP2TMuxer(void)
@@ -33,6 +34,39 @@ MP2TMuxer::~MP2TMuxer(void)
 		++it2;
 	}
 	mPMTs.clear();
+
+	/*PESQueueMap::iterator it3 = mPESQueueMap.begin();
+	while(it3 != mPESQueueMap.end()){
+		delete it3->second;
+		++it3;
+	}
+	mPESQueueMap.clear();*/
+
+	if(mpDeliverer){
+		delete mpDeliverer;
+		mpDeliverer = NULL;
+	}
+
+	if(mpTicker){
+		delete mpTicker;
+		mpTicker = NULL;
+	}
+}
+
+Ticker *MP2TMuxer::GetTicker(){
+	return mpTicker;
+}
+
+void MP2TMuxer::SetTicker(Ticker *ticker){
+	mpTicker = ticker;
+}
+
+void MP2TMuxer::SetDeliverer(IDeliverer *pDeliverer){
+	this->mpDeliverer = pDeliverer;
+}
+
+IDeliverer *MP2TMuxer::GetDeliverer(){
+	return mpDeliverer;
 }
 
 void MP2TMuxer::AddProgram(Program* program){
@@ -43,121 +77,224 @@ void MP2TMuxer::AddProgram(Program* program){
 	mPMTs.push_back(new PMT(program));
 
 	mPCRPIDs.push_back(program->PCRPID());
+
+	//Intialize the CC for each Stream, and prepare the PES queue
+	Program::StreamVector &sv = program->Streams();
+	Program::StreamVector::iterator cit = sv.begin();
+	Program::Stream *s = NULL;
+	for(;cit != sv.end();){
+		s = *cit;
+		mContinuityCounter[s->ElementaryPID()] = 0x00;
+		///mPESQueueMap[s->ElementaryPID()] = new PESQueue();
+		///s->LastFrameTimestamp(GetTicker()->TickCount());
+		++cit;
+	}
 }
 
-int MP2TMuxer::Mux(Program::Stream* s, unsigned char* data, unsigned long size, bool sleep){
-
-	DWORD i = GetTickCount();
-
-	if(mContinuityCounter.count(s->ElementaryPID()) == 0){
-		mContinuityCounter[s->ElementaryPID()] = 0x00;
+Program *MP2TMuxer::GetProgram(int idx /* = 0 */){
+	if(mPrograms.size() < idx + 1){
+		return NULL;
 	}
 
-	Deliver(s->ElementaryPID(), data, size);
+	return mPrograms[idx];
+}
 
-	//delete[] pesBuffer;
+//buf中为ES
+int MP2TMuxer::Mux(Program::Stream *s, MutableHeaderBuffer *buf, unsigned int duration){
+	unsigned int timestamp = GetTicker()->TickCount();
 
-#if 0
-	DWORD i2 = GetTickCount();
+	static bool isFirst = true;
+	static unsigned int lasttsv = 0, lasttsa = 0;
+	static int cnt = 0;
 
-	if(sleep){
-		if(i2 - i < 34){
-//			Sleep(34 - i2 + i);
-		}
+	ESDataType dt = ESDT_INVALID;
+	if(s->Type() == Program::Stream::StreamType_Video){
+		dt = ESDT_VIDEO;
+		lasttsv = (timestamp = (GetTicker()->TickCount() - getVideoStartTimestamp()));	//ms
+		//printf("video timestamp: %d \n", timestamp);
+	}else if(s->Type() == Program::Stream::StreamType_Audio){
+		dt = ESDT_AUDIO;
+		lasttsa = timestamp = cnt * 24;
+		//if(timestamp > lasttsv){ //丢弃部分声音
+		//	return 0;
+		//}
+		//printf("audio timestamp: %d \n", timestamp);
+		cnt += 1;
 	}
-#endif
+
+	//PESHeader
+	PESHeader header(dt, buf->HeadlessDataLength(), timestamp);
+	buf->AppendHeader(header.Read(), header.Length());
+	
+	PES *pes = new PES(buf->HeadedData(), buf->HeadedDataLength(), timestamp);
+
+	if(dt == ESDT_VIDEO){
+		PESData d;
+		d.pid = s->ElementaryPID();
+		d.tsx1000 = timestamp * 1000;
+		d.dpp = 33 * 1000 * 184. / pes->Length();
+		d.pes = pes;
+		mVideoPESQueue.push(d);
+	}else if(dt == ESDT_AUDIO){
+		PESData d;
+		d.pid = s->ElementaryPID();
+		d.tsx1000 = timestamp * 1000;
+		d.dpp = 24 * 1000 * 184. / pes->Length();
+		d.pes = pes;
+		mAudioPESQueue.push(d);
+	}
 
 	return 0;
 }
 
-//@data: TS packet
-inline int MP2TMuxer::DeliverPacket(const unsigned char* data, unsigned long size){
-
+void MP2TMuxer::Deliver(){
 	if(mPSIPeriod <= 0 && mPeriodicSendPSI){
 		mPSIPeriod = PATPMT_INTERVAL;
 		DeliverPATPMT();
 	}
 
-	if(this->mDeliverer){
+	static unsigned int lastVideoTS = 0;
+	static unsigned int lastAudioTS = 0;
+	static unsigned int pkcnt = 0;
 
-		mPSIPeriod -= (size / Packet::PACKET_LENGTH);
+	do{
+		PESData *pda = NULL, *pdv = NULL;
 
-		return mDeliverer(data, size, mDeliverHandler);
-	}
+		///VIDEO
+		if(mVideoPESQueue.size() > 0){
+			pdv = &mVideoPESQueue.front();
+		}
 
-	return 0;
+		///AUDIO
+		if(mAudioPESQueue.size() > 0){
+			pda = &mAudioPESQueue.front();
+		}
+
+		if(pdv == NULL){
+			break;
+		}
+
+		bool needpop = false;
+		if(!pda || pda->tsx1000 > pdv->tsx1000){
+			Packet packet(pdv->pid, pdv->offset == 0);
+
+			if(pdv->pes->Length() - pdv->offset < packet.PayloadCapacity()){
+				packet.AFE(0x03);
+				needpop = true;
+			}
+			if(pdv->offset == 0){
+				packet.AFE(0x03);
+				packet.SetPCR(mLastPCR = (GetTicker()->TickCount() - getVideoStartTimestamp()));
+			}
+
+			///sned a v packet
+			unsigned long ate = packet.Fill((unsigned char *)pdv->pes->Read(pdv->offset), pdv->pes->Length() - pdv->offset);
+			this->DeliverPacket(packet);
+			pdv->offset += ate;
+			pdv->tsx1000 += pdv->dpp;
+
+			if(needpop){
+				delete pdv->pes;
+				mVideoPESQueue.pop();
+			}
+		}else{
+			///sned a aud packet
+			Packet packet(pda->pid, pda->offset == 0);
+			if(pda->pes->Length() - pda->offset < packet.PayloadCapacity()){
+				packet.AFE(0x03);
+				needpop = true;
+			}
+
+			unsigned long ate = packet.Fill((unsigned char *)pda->pes->Read(pda->offset), pda->pes->Length() - pda->offset);
+			this->DeliverPacket(packet);
+			pda->offset += ate;
+			pda->tsx1000 += pda->dpp;
+
+			if(needpop){
+				delete pda->pes;
+				mAudioPESQueue.pop();
+			}
+		}
+
+	}while(true);
 }
 
-#if 0
-double MP2TMuxer::DifferenceFromBaseST(){
-	SYSTEMTIME stNow;
-	FILETIME ft;
+int MP2TMuxer::PackAndDeliver(unsigned short pid, unsigned char* data, unsigned long size, unsigned int timestamp, bool pes/* = true*/){
 
-	GetLocalTime(&stNow);
+	Packet packet(pid, true);
 
-	ULARGE_INTEGER ulBase, ulNow;
-
-	SystemTimeToFileTime(&mBaseST, &ft);
-	ulBase.HighPart = ft.dwHighDateTime;
-	ulBase.LowPart = ft.dwLowDateTime;
-
-	SystemTimeToFileTime(&stNow, &ft);
-	ulNow.HighPart = ft.dwHighDateTime;
-	ulNow.LowPart = ft.dwLowDateTime;
-
-	uint64_t nDiff = ulNow.QuadPart - ulBase.QuadPart;
-	//return (nDiff >> 14) / 52734375.f;
-	return nDiff / 10000000.f;
-	//return nDiff / 24. / 60. / 60. / 1000.;
-}
-#endif
-
-int MP2TMuxer::Deliver(unsigned short pid, unsigned char* data, unsigned long size){
-
-	int c = count(mPCRPIDs.begin(), mPCRPIDs.end(), pid);
-
-	Packet packet(pid, true, c == 0 ? 0x01 : 0x03);
-	packet.SetCC(mContinuityCounter[pid]);
-
-	//SYSTEMTIME stUTC;
-	//GetLocalTime(&stUTC);
-	//packet.SetPCR(DifferenceFromBaseST());
-	packet.SetPCR(mFrameCount/*, 25.*/);
-
-	//then into TS
+	//Fill into TS
 	unsigned long idx = 0;
 	while(idx < size){
+		if(size - idx < packet.PayloadCapacity() && pes){	//一帧发不完的PES, 末尾需要填充!
+			packet.AFE(0x03);
+		}
 		unsigned long ate = packet.Fill(data + idx, size - idx);
-		this->DeliverPacket(packet.Data());
+		this->DeliverPacket(packet);
 		idx += ate;
-
-		packet.Reset();	//update CC in
 	}
 
-	mContinuityCounter[pid] = packet.GetCC();
-
 	return 0;
+}
+
+//@data: TS packet
+int MP2TMuxer::DeliverPacket2(Packet &packet, std::vector<PacketData> &packs){
+	return 0;
+}
+
+//@data: TS packet
+int MP2TMuxer::DeliverPacket(Packet &packet){
+	unsigned short pid = packet.PID();
+	
+	if(this->mpDeliverer){
+		mPSIPeriod -= 1;
+
+		packet.SetCC(mContinuityCounter[pid]);
+		int ret = this->mpDeliverer->Deliver((const char *)packet.Data(), Packet::PACKET_LENGTH);
+		packet.Reset();
+		mContinuityCounter[pid] = packet.GetCC();
+
+		return ret;
+	}
+	if (mDeliverer) {
+		mPSIPeriod -= 1;
+
+		packet.SetCC(mContinuityCounter[pid]);
+		int ret = this->mDeliverer((const unsigned char *)packet.Data(), Packet::PACKET_LENGTH, mDeliverHandler);
+		packet.Reset();
+		mContinuityCounter[pid] = packet.GetCC();
+	}
+	
+	return 0;
+}
+
+void MP2TMuxer::DeliverPCR(){
+	Packet packet(256, false, 0x03);
+	packet.SetCC(mContinuityCounter[256]);
+	///packet.SetPCR(GetTicker()->TickCount());
+	packet.SetPCR(mLastPCR / 1000.);
+
+	this->DeliverPacket(packet);
+
+	//packet.Reset();
+	mContinuityCounter[256] = packet.GetCC();
 }
 
 void MP2TMuxer::DeliverPATPMT(){
 	//PAT
-	unsigned char * pBuffer = NULL;
-	unsigned long size = mPAT.Bitstream(pBuffer);
+	unsigned char * pBuffer = (unsigned char *)mPAT.Bitstream();
+	unsigned int size = mPAT.BitstreamSize();
 
-	Deliver(0x00, pBuffer, size);
-
-	delete[] pBuffer;
+	PackAndDeliver(0x00, pBuffer, size, 0, false);
 
 	//PMTs
 	PMTVector::iterator it = mPMTs.begin();
 	while(it != mPMTs.end()){
 		PMT* pmt = *it;
-
-		size = pmt->Bitstream(pBuffer);
-		Deliver(pmt->PID(), pBuffer, size);
-
-		delete[] pBuffer;
-
+		pBuffer = (unsigned char *)pmt->Bitstream();
+		size = pmt->BitstreamSize();
+		PackAndDeliver(pmt->PID(), pBuffer, size, 0, false);
+		
 		++it;
 	}
 }

@@ -2,6 +2,8 @@
 #include "PMT.h"
 #include "Program.h"
 
+using namespace com::cloume::cap::streaming;
+
 unsigned short PMT::PCRPID(){
 	return mProgram->PCRPID();
 }
@@ -15,11 +17,11 @@ unsigned short PMT::UserDefinedData(){
 }
 
 unsigned short PMT::SectionLength(){
-	return 
+	return unsigned short(
 		5 
 		+ 4		//NO descriptor
 		+ mProgram->Streams().size() * 5	//each stream need 5 bytes (NO descriptor)
-		+ 4;	//CRC32
+		+ 4);	//CRC32
 }
 
 unsigned short PMT::ProgramInfoLength(){
@@ -27,12 +29,12 @@ unsigned short PMT::ProgramInfoLength(){
 }
 
 unsigned long PMT::BitstreamSize(){
-	return 
+	return unsigned long(
 		9		//TABLE info
 		+ 2		//PCR PID
 		+ 2 + ProgramInfoLength()
 		+ 5 * mProgram->Streams().size()	//Elementary list, NO ES Descriptor
-		+ 4;	//CRC32
+		+ 4);	//CRC32
 }
 
 int PMT::BitstreamAfterTableInfo(unsigned char* pBuffer){

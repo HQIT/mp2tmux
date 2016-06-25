@@ -1,5 +1,7 @@
 #include "Program.h"
 
+using namespace com::cloume::cap::streaming;
+
 Program::Program(unsigned short number, unsigned short pmtpid) : mNumber(number), mPMTPID(pmtpid){
 	mStreamsCounter[Stream::StreamType_Video] = 0;
 	mStreamsCounter[Stream::StreamType_Audio] = 0;

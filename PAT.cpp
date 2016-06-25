@@ -1,6 +1,8 @@
 #include "PSI.h"
 #include "PAT.h"
 
+using namespace com::cloume::cap::streaming;
+
 unsigned long PAT::BitstreamSize(){
 	return 
 		9		//TABLE info

@@ -3,6 +3,9 @@
 #include <vector>
 #include <map>
 
+namespace com{
+	namespace cloume{
+		namespace cap{ namespace streaming{
 class Program
 {
 public:
@@ -11,12 +14,15 @@ public:
 		enum EnumStreamType{
 			StreamType_Video = 0,
 			StreamType_Audio,
-			StreamType_Subtitle
+			StreamType_Subtitle,
+			StreamType_PCR,
 		};
 
 		enum EnumStreamSubtype{
 			STREAMSUBTYPE_H264_VIDEO = 0x1b,
-			STREAMSUBTYPE_ISO_IEC_13818_3_AUDIO = 0x04
+			STREAMSUBTYPE_ISO_IEC_13818_3_AUDIO = 0x04,	//MPEG-II
+			STREAMSUBTYPE_ISO_IEC_11172_3_AUDIO = 0x03,	//MPEG-I
+			STREAMSUBTYPE_PCR = 0xFF,
 		};
 
 	public:
@@ -28,8 +34,13 @@ public:
 		unsigned char Index(){ return mIndex; }
 		void SetIndex(unsigned char index){ mIndex = index; }
 
+		unsigned int LastFrameTimestamp(){ return mLastFrameTimestamp; }
+		void LastFrameTimestamp(unsigned int ts){ mLastFrameTimestamp = ts; }
+
 	protected:
-		Stream(EnumStreamType type, EnumStreamSubtype Subtype, unsigned short ElementaryPID){
+		Stream(EnumStreamType type, EnumStreamSubtype Subtype, unsigned short ElementaryPID)
+			: mLastFrameTimestamp(0)
+		{
 			this->mType = type;
 			this->mSubtype = Subtype;
 			this->mElementaryPID = ElementaryPID;
@@ -40,6 +51,8 @@ public:
 		EnumStreamSubtype mSubtype;
 		unsigned short mElementaryPID;
 		unsigned char mIndex;
+
+		unsigned int mLastFrameTimestamp;
 	};
 
 	class StreamVideo : public Stream{
@@ -53,6 +66,13 @@ public:
 	public:
 		StreamAudio(EnumStreamSubtype Subtype, unsigned short ElementaryPID)
 			: Stream(StreamType_Audio, Subtype, ElementaryPID){
+		}
+	};
+
+	class StreamPCR : public Stream{
+	public:
+		StreamPCR(unsigned short ElementaryPID)
+			: Stream(StreamType_Audio, Stream::STREAMSUBTYPE_PCR, ElementaryPID){
 		}
 	};
 
@@ -83,3 +103,8 @@ private:
 };
 
 typedef std::vector<Program*> ProgramVector;
+
+		}
+		}
+	}
+}

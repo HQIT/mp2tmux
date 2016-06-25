@@ -120,7 +120,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="BasicBinaryBuffer.h" />
     <ClInclude Include="CRC.h" />
+    <ClInclude Include="IDeliverer.h" />
     <ClInclude Include="MP2TMuxer.h" />
     <ClInclude Include="Packet.h" />
     <ClInclude Include="PAT.h" />
@@ -128,16 +130,20 @@
     <ClInclude Include="PMT.h" />
     <ClInclude Include="Program.h" />
     <ClInclude Include="PSI.h" />
+    <ClInclude Include="Ticker.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="BasicBinaryBuffer.cpp" />
     <ClCompile Include="CRC.cpp" />
     <ClCompile Include="MP2TMuxer.cpp" />
+    <ClCompile Include="MutableHeaderBuffer.cpp" />
     <ClCompile Include="Packet.cpp" />
     <ClCompile Include="PAT.cpp" />
     <ClCompile Include="PES.cpp" />
     <ClCompile Include="PMT.cpp" />
     <ClCompile Include="Program.cpp" />
     <ClCompile Include="PSI.cpp" />
+    <ClCompile Include="Ticker.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.txt" />
